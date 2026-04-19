@@ -11,9 +11,7 @@ hitting your local Magento store via UCP.
 Phase A  →  Install both modules
 Phase B  →  Admin panel — register your agent
 Phase C  →  Generate DID + apply dev patches
-Phase D  →  Configure + run the test scripts
-Phase E  →  Full checkout flow test
-Phase F  →  Live chat via Ollama or Open WebUI
+Phase D  →  Live chat via Ollama or Open WebUI
 ```
 
 ---
@@ -170,7 +168,7 @@ if (isset($localDevKeys[$did])) {
 php bin/magento setup:di:compile && php bin/magento cache:flush
 ```
 
-### C4. Verify resolver works
+### C3. Verify resolver works
 
 ```bash
 php -r "
@@ -186,148 +184,19 @@ Expected: `OK — key returned`
 
 ---
 
-## Phase D — Run policy and auth tests
+## Phase D — Live chat via Ollama
 
-### D1. Configure ucp_test.py
-
-```python
-MAGENTO_BASE         = "https://default.freshm2.test"
-UCP_TOKEN_SECRET     = "your-secret-from-env-php"
-TEST_DID             = "did:web:default.freshm2.test:agents:test"
-ANTHROPIC_API_KEY    = "sk-ant-..."        # for Claude brain
-DEFAULT_OLLAMA_MODEL = "llama3.2:latest"   # for Ollama brain
-```
-
-### D2. Install dependencies
-
-```bash
-pip install requests anthropic
-```
-
-### D3. Policy tests only (fastest, no AI)
-
-```bash
-python ucp_test.py --brain ollama --skip-agent
-```
-
-Runs: connectivity, discovery, auth, 4 policy checks, rate limit.
-
-### D4. Full test with Claude brain
-
-```bash
-python ucp_test.py --brain claude
-```
-
-### D5. Full test with Ollama brain
-
-```bash
-ollama pull llama3.2:latest
-ollama serve
-python ucp_test.py --brain ollama --model llama3.2:latest
-
-# Inside Warden Docker — Ollama is on host machine
-python ucp_test.py --brain ollama \
-  --ollama-host http://host.docker.internal:11434
-```
-
-### D6. What each test validates
-
-| Test | Expected result |
-|---|---|
-| 0. Connectivity | HTTP 200, SSL valid |
-| 1. Discovery | Manifest with agent and capabilities |
-| 2. Auth | access_token returned |
-| 3a. No token | 401 |
-| 3b. Tampered token | 401 |
-| 3c. Order over $500 | 422 |
-| 3d. No confirmation header | 400 + instructions |
-| 4. Rate limit (35 req) | 429 after 30th request |
-| 5. AI agent loop | 4+ autonomous tool calls |
-
----
-
-## Phase E — Full checkout flow test
-
-### E1. Verify store has products
-
-```bash
-# Get a token first (run --skip-agent once to see the token in output)
-# Then:
-curl -sk https://default.freshm2.test/rest/V1/ucp/catalog \
-  -H "Authorization: Bearer YOUR_TOKEN" | python3 -m json.tool
-```
-
-If empty: `Catalog → Products → Add Product` in admin.
-
-### E2. Configure ucp_checkout_test.py
-
-```python
-MAGENTO_BASE         = "https://default.freshm2.test"
-UCP_TOKEN_SECRET     = "your-secret-from-env-php"
-TEST_DID             = "did:web:default.freshm2.test:agents:test"
-TEST_SKU             = ""              # blank = auto-pick first product
-TEST_EMAIL           = "agent@ucp.local"
-TEST_SHIPPING_METHOD = "flatrate_flatrate"
-TEST_PAYMENT_METHOD  = "checkmo"
-```
-
-### E3. Run manual mode first
-
-```bash
-python ucp_checkout_test.py --manual
-```
-
-Steps through all 13 stages with raw HTTP response at each step.
-Fix any failures before running AI mode.
-
-Expected successful run:
-```
-Step 1   Discover        ✓  manifest returned
-Step 2   Authenticate    ✓  token received
-Step 3   Browse          ✓  N products found
-Step 4   Search          ✓  results returned
-Step 5   Inventory       ✓  SKU in stock
-Step 6   Add to cart     ✓  item added
-Step 7   View cart       ✓  1 item
-Step 8   Shipping methods ✓  flatrate available
-Step 9   Set shipping    ✓  address set, totals collected
-Step 10  Payment methods ✓  checkmo available
-Step 11  Totals          ✓  grand total: USD XX.XX
-Step 12  Place order     ✓  order #000000001 placed
-Step 13  Track order     ✓  status: pending
-```
-
-### E4. Run AI-driven checkout
-
-```bash
-python ucp_checkout_test.py --brain claude
-python ucp_checkout_test.py --brain ollama --model llama3.2:latest
-```
-
-### E5. Common checkout failures
-
-| Symptom | Fix |
-|---|---|
-| Add to cart fails | Check product is In Stock in catalog |
-| Empty shipping methods | Set shipping address first, enable Flat Rate |
-| Order fails | Enable Guest Checkout, verify payment method active |
-| Cart empty between requests | Check Redis running, try cache:flush |
-
----
-
-## Phase F — Live chat via Ollama
-
-Two identical chat clients are provided — use whichever runtime you prefer.
+Two identical chat clients live in `local_testing_ollama/` — use whichever runtime you prefer.
 Both share the same config constants, CLI flags, tool set, and system prompt.
 
-### F1. Python terminal chat
+### D1. Python terminal chat
 
 **Requirements:**
 ```bash
 pip install requests
 ```
 
-**Edit `ucp_chat.py`** — set the three constants at the top:
+**Edit `local_testing_ollama/ucp_chat.py`** — set the three constants at the top:
 ```python
 MAGENTO_BASE     = "https://default.freshm2.test"
 UCP_TOKEN_SECRET = "your-secret-from-env-php"
@@ -336,16 +205,17 @@ TEST_DID         = "did:web:default.freshm2.test:agents:test"
 
 **Run:**
 ```bash
+cd local_testing_ollama
 python ucp_chat.py
 python ucp_chat.py --model llama3.1
 python ucp_chat.py --model qwen2.5 --ollama-host http://host.docker.internal:11434
 ```
 
-### F2. JavaScript terminal chat
+### D2. JavaScript terminal chat
 
 **Requirements:** Node.js 18+ — no packages needed.
 
-**Edit `ucp_chat.js`** — set the same three constants:
+**Edit `local_testing_ollama/ucp_chat.js`** — set the same three constants:
 ```js
 let   MAGENTO_BASE     = 'https://default.freshm2.test';
 const UCP_TOKEN_SECRET = 'your-secret-from-env-php';
@@ -354,6 +224,7 @@ const TEST_DID         = 'did:web:default.freshm2.test:agents:test';
 
 **Run:**
 ```bash
+cd local_testing_ollama
 node ucp_chat.js
 node ucp_chat.js --model llama3.1
 node ucp_chat.js --model qwen2.5 --ollama-host http://host.docker.internal:11434
@@ -363,7 +234,7 @@ SSL is resolved automatically from `REQUESTS_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`,
 or `~/.warden/ssl/rootca/certs/ca.cert.pem` (Warden default). Falls back to
 `rejectUnauthorized: false` if no CA file is found.
 
-### F3. Example conversation
+### D3. Example conversation
 
 ```
 You: show me products under $30
@@ -373,7 +244,7 @@ You: what is my total?
 You: place the order, email me@example.com
 ```
 
-### F4. CLI flags (both clients)
+### D4. CLI flags (both clients)
 
 | Flag | Default | Description |
 |---|---|---|
@@ -381,7 +252,7 @@ You: place the order, email me@example.com
 | `--ollama-host URL` | `http://localhost:11434` | Ollama API base URL |
 | `--magento URL` | value in script | Override Magento base URL |
 
-### F5. Open WebUI (visual interface)
+### D5. Open WebUI (visual interface)
 
 ```bash
 docker run -d --network=host \
@@ -394,7 +265,7 @@ docker run -d --network=host \
 Open `http://localhost:8080`, go to `Workspace → Tools → + New Tool`,
 paste the UCP tool plugin, set `MAGENTO_BASE` and `UCP_TOKEN_SECRET`.
 
-### F6. Model recommendations
+### D6. Model recommendations
 
 | Model | Size | Tool use |
 |---|---|---|
@@ -461,27 +332,13 @@ openssl ec -in ~/ucp-keys/agent-private.pem -pubout -out ~/ucp-keys/agent-public
 # Smoke test
 curl -sk https://default.freshm2.test/.well-known/ucp.json | python3 -m json.tool
 
-# Policy tests only
-python ucp_test.py --brain ollama --skip-agent
-
-# Full test — Claude
-python ucp_test.py --brain claude
-
-# Full test — Ollama
-ollama pull llama3.1 && ollama serve
-python ucp_test.py --brain ollama --model llama3.1
-
-# Checkout flow — manual
-python ucp_checkout_test.py --manual
-
-# Checkout flow — AI
-python ucp_checkout_test.py --brain claude
-
 # Terminal chat — Python (pip install requests)
+cd local_testing_ollama
 python ucp_chat.py
 python ucp_chat.py --model llama3.1 --ollama-host http://host.docker.internal:11434
 
 # Terminal chat — JavaScript (Node 18+, no packages)
+cd local_testing_ollama
 node ucp_chat.js
 node ucp_chat.js --model llama3.1 --ollama-host http://host.docker.internal:11434
 
